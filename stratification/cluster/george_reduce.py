@@ -3,12 +3,14 @@ import os
 from collections import defaultdict
 import logging
 
+import sys
 import torch
 import numpy as np
 
-import stratification.cluster.models.reduction as reduction_models
+sys.path.append(os.path.abspath('../stratification'))
+import cluster.models.reduction as reduction_models
 
-from stratification.utils.logger import init_logger
+from utils.logger import init_logger
 
 
 class GEORGEReducer:

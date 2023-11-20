@@ -22,7 +22,8 @@ class CelebADataset(GEORGEDataset):
     ]
     _channels = 3
     _resolution = 224
-    _normalization_stats = {'mean': (0.485, 0.456, 0.406), 'std': (0.229, 0.224, 0.225)}
+    _normalization_stats = {
+        'mean': (0.485, 0.456, 0.406), 'std': (0.229, 0.224, 0.225)}
 
     def __init__(self, root, split, transform=None, download=False, ontology='default',
                  augment=False):
@@ -33,12 +34,25 @@ class CelebADataset(GEORGEDataset):
 
     def _download(self):
         """Raises an error if the raw dataset has not yet been downloaded."""
-        raise ValueError('Follow the README instructions to download the dataset.')
+        raise ValueError(
+            'Follow the README instructions to download the dataset.')
 
     def _check_exists(self):
-        """Checks whether or not the waterbirds labels CSV has been initialized."""
+        """Checks whether or not the celebA labels CSV has been initialized."""
+        print(os.getcwd())
+    # os.chdir("")
+        # os.chdir('Re')
+        # os.chdir("~/Users/Jen/UT Austin/Research/hidden-stratification/data")
+        # print(os.getcwd())
+        # print(self.root)
+        initial_path = os.path.dirname(os.getcwd())
+        # print(os.path.dirname(os.getcwd()))
+        self.root = os.path.join(initial_path, self.root)
+        # print("hii", os.path.join(self.root, 'celebA', 'img_align_celeba'))
+        # print(os.path.isdir(os.path.join(self.root, 'celebA', 'img_align_celeba')))
         return os.path.isdir(os.path.join(self.root, 'celebA', 'img_align_celeba')) and \
-               os.path.isfile(os.path.join(self.root, 'celebA', 'list_attr_celeba.csv'))
+            os.path.isfile(os.path.join(
+                self.root, 'celebA', 'list_attr_celeba.csv'))
 
     def _load_samples(self):
         self.target_name = 'Blond_Hair'
@@ -69,11 +83,14 @@ class CelebADataset(GEORGEDataset):
         # Map the confounder attributes to a number 0,...,2^|confounder_idx|-1
         self.confounder_idx = [attr_idx(a) for a in self.confounder_names]
         confounders = attrs_df[:, self.confounder_idx]
-        confounder_array = confounders @ np.power(2, np.arange(len(self.confounder_idx)))
+        confounder_array = confounders @ np.power(
+            2, np.arange(len(self.confounder_idx)))
 
         # Map to groups
-        self._num_subclasses = self._num_supclasses * pow(2, len(self.confounder_idx))
-        group_array = (y_array * (self._num_subclasses / 2) + confounder_array).astype('int')
+        self._num_subclasses = self._num_supclasses * \
+            pow(2, len(self.confounder_idx))
+        group_array = (y_array * (self._num_subclasses / 2) +
+                       confounder_array).astype('int')
 
         # Read in train/val/test splits
         split_df = pd.read_csv(os.path.join(self.root, 'celebA', 'list_eval_partition.csv'),

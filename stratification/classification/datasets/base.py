@@ -14,20 +14,21 @@ class GEORGEDataset(Dataset):
     """
     Lightweight class that enforces design pattern used within the training
     loop. Essential components:
-    
+
     split  (str)    must be in {'train', 'train_clean', 'val', 'test'}.
         - 'train' datasets are for model training. Data augmentation commonly applied.
         - 'train_clean' datasets are for model evaluation on the train set.
             Unshuffled and with no data augmentation. Used for clsutering step.
         - 'val' datasets are for model evaluation during training.
         - 'test' datasets are for model evaluation after training.
-        
+
     X      (any)    input to model. Passed through directly.
     Y_dict (dict)   targets used for computing loss and metrics.
         - the 'superclass' key will be used for data quality loss computation
         - the 'subclass' key will be used to compute metrics, as well as for DRO loss
         - the 'true_subclass' key will be used to compute metrics, if available
     """
+
     def __init__(self, name, root, split, transform=None, download=False, ontology='default'):
         self.name = name
         self.root = root
@@ -35,6 +36,7 @@ class GEORGEDataset(Dataset):
         self.split = split
         self.transform = transform
         assert self.split in DATA_SPLITS
+        print(self._check_exists())
         if not self._check_exists():
             if download:
                 self._download()
@@ -99,7 +101,8 @@ class GEORGEDataset(Dataset):
         """
         assert len(values) == len(self)
         if key in self.Y_dict.keys():
-            logging.info(f'{key} in Y_dict already exists and will be overwritten.')
+            logging.info(
+                f'{key} in Y_dict already exists and will be overwritten.')
         if isinstance(values, torch.Tensor):
             values_tensor = values.clone().detach()
         else:
@@ -123,11 +126,13 @@ class GEORGEDataset(Dataset):
                     generate_random_labels(self.Y_dict['superclass'], self.Y_dict['true_subclass'],
                                            seed=seed))
             else:
-                raise ValueError(f'subclass_labels string {subclass_labels} not recognized.')
+                raise ValueError(
+                    f'subclass_labels string {subclass_labels} not recognized.')
         elif subclass_labels is not None:
             self.add_labels('subclass', subclass_labels)
         else:
-            raise ValueError(f'subclass_labels object {subclass_labels} not recognized.')
+            raise ValueError(
+                f'subclass_labels object {subclass_labels} not recognized.')
         self._subclass_labels_added = True
 
     def get_num_classes(self, key):
@@ -146,7 +151,8 @@ class GEORGEDataset(Dataset):
             return self._class_maps[key]
         else:
             assert (self._subclass_labels_added)
-            sup_to_sub_map = build_sup_to_sub_map(self.Y_dict['superclass'], self.Y_dict[key])
+            sup_to_sub_map = build_sup_to_sub_map(
+                self.Y_dict['superclass'], self.Y_dict[key])
             self._class_maps[key] = sup_to_sub_map
             return sup_to_sub_map
 
@@ -170,12 +176,14 @@ def generate_random_labels(superclass_labels, subclass_labels, proportions=None,
     data_mod_seed = random.randint(0, 2**32)
     random.seed(data_mod_seed)
 
-    superclass_labels, subclass_labels = np.array(superclass_labels), np.array(subclass_labels)
+    superclass_labels, subclass_labels = np.array(
+        superclass_labels), np.array(subclass_labels)
     random_labels = -np.ones_like(superclass_labels)
     superclass_set = sorted(set(superclass_labels))
     if proportions is None:
         proportions = []
-        sup_to_sub_map = build_sup_to_sub_map(superclass_labels, subclass_labels)
+        sup_to_sub_map = build_sup_to_sub_map(
+            superclass_labels, subclass_labels)
         for superclass in superclass_set:
             proportions.append([])
             for subclass in sup_to_sub_map[superclass]:
@@ -188,7 +196,8 @@ def generate_random_labels(superclass_labels, subclass_labels, proportions=None,
         num_subclass_examples = np.sum(superclass_indices)
         subclass_proportions = proportions[superclass]
         cumulative_prop = np.cumsum(subclass_proportions)
-        cumulative_prop = np.round(cumulative_prop * num_subclass_examples).astype(np.int)
+        cumulative_prop = np.round(
+            cumulative_prop * num_subclass_examples).astype(np.int)
         cumulative_prop = np.concatenate(([0], cumulative_prop))
         assert (cumulative_prop[-1] == num_subclass_examples)
         mock_sub = -np.ones(num_subclass_examples)
@@ -196,7 +205,8 @@ def generate_random_labels(superclass_labels, subclass_labels, proportions=None,
             percentile_lower, percentile_upper = cumulative_prop[i], cumulative_prop[i + 1]
             mock_sub[percentile_lower:percentile_upper] = i
         assert (np.all(mock_sub >= 0))
-        mock_sub = mock_sub + np.amax(random_labels) + 1  # adjust for previous superclasses
+        # adjust for previous superclasses
+        mock_sub = mock_sub + np.amax(random_labels) + 1
         random.shuffle(mock_sub)
         random_labels[superclass_indices] = mock_sub
     assert (np.all(random_labels >= 0))

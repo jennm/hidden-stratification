@@ -7,10 +7,13 @@ except ModuleNotFoundError:
 from functools import partial
 import logging
 import numpy as np
+import os
+import sys
 from sklearn.cluster import KMeans
 from sklearn.mixture import GaussianMixture
 
-from stratification.cluster.utils import silhouette_samples
+sys.path.append(os.path.abspath('../stratification'))
+from ..utils import silhouette_samples
 
 __all__ = [
     'KMeans', 'GaussianMixture', 'FastKMeans', 'AutoKMixtureModel', 'OverclusterModel',

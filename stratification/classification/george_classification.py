@@ -3,19 +3,22 @@ import logging
 from functools import partial
 
 import numpy as np
+import os
 import sklearn.metrics
+import sys
 import torch
 import torch.optim as optimizers
 import torch.optim.lr_scheduler as schedulers
 import torch.nn.functional as F
 from progress.bar import IncrementalBar as ProgressBar
 
-from stratification.classification.utils import AverageMeter, compute_accuracy, compute_roc_auc
-from stratification.classification.datasets import LABEL_TYPES, GEORGEDataset
-from stratification.classification.losses import init_criterion
+from .utils import AverageMeter, compute_accuracy, compute_roc_auc
+from .datasets import LABEL_TYPES, GEORGEDataset
+from .losses import init_criterion
 
-from stratification.utils.logger import init_logger, init_epoch_logger
-from stratification.utils.utils import format_timedelta, move_to_device, get_learning_rate, concatenate_iterable
+sys.path.append(os.path.abspath('../cluster'))
+from utils.logger import init_logger, init_epoch_logger
+from utils.utils import format_timedelta, move_to_device, get_learning_rate, concatenate_iterable
 
 
 PROGRESS_BAR_SUFFIX = '({batch}/{size}) Time {total:} | ETA {eta:} | ' \

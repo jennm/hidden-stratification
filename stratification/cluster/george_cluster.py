@@ -5,12 +5,14 @@ import json
 import logging
 
 import torch
+import sys
 import numpy as np
 
-from stratification.cluster.models.cluster import DummyClusterer
-from stratification.cluster.utils import get_cluster_mean_loss, get_cluster_composition, get_k_from_model
+# sys.path.append(os.path.a,,,bspath('../stratification'))
+from cluster.models.cluster import DummyClusterer
+from cluster.utils import get_cluster_mean_loss, get_cluster_composition, get_k_from_model
 
-from stratification.utils.logger import init_logger
+from utils.logger import init_logger
 
 
 class GEORGECluster:

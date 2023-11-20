@@ -10,7 +10,10 @@ import pandas as pd
 import torch
 from torchvision import transforms
 
-from stratification.classification.datasets.base import GEORGEDataset
+import sys
+import os
+sys.path.append(os.path.abspath('../stratification'))
+from classification.datasets.base import GEORGEDataset
 
 
 class ISICDataset(GEORGEDataset):

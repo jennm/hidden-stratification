@@ -7,7 +7,7 @@ import time
 import json
 from functools import singledispatch
 from datetime import datetime, timedelta
-from collections import MutableMapping
+# from collections import MutableMapping
 
 import numpy as np
 import torch
@@ -234,10 +234,10 @@ def flatten_dict(d, parent_key='', sep='_'):
     items = []
     for k, v in d.items():
         new_key = parent_key + sep + k if parent_key else k
-        if isinstance(v, MutableMapping):
-            items.extend(flatten_dict(v, new_key, sep=sep).items())
-        else:
-            items.append((new_key, v))
+        # if isinstance(v, MutableMapping):
+        #     items.extend(flatten_dict(v, new_key, sep=sep).items())
+        # else:
+        items.append((new_key, v))
     return dict(items)
 
 
