@@ -52,11 +52,14 @@ def write_ds(model, dataloader):
 
     for example in dataloader:
         input = example[0] 
-        model(input)
+        output = model(input)
+        pred = torch.argmax(output, 1)
+        outputs['predicted_label'].append(pred)
+        outputs['loss'].append(output)
 
         for idx, tensor in enumerate(tail_cache):
             batch = list(torch.split(tensor, 1, dim=0))
-            outputs[f'{idx}-to-last'].append(batch)
+            outputs[f'{idx}-to-last'].expend(batch)
             
             # data[idx].extend(batch)
         
