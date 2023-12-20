@@ -1,6 +1,7 @@
 import argparse
 import json
 import torch
+import pandas as pd
 
 
 from stratification.utils.parse_args import get_config
@@ -22,6 +23,7 @@ def setup(config_fp):
 tail_cache = []
 def hook_fn(module, input, output):
     tail_cache.append(input[0].clone().detach())
+    # print(len(tail_cache))
 
 
 def get_hooks(model):
@@ -30,13 +32,15 @@ def get_hooks(model):
     print('model num layers', num_layers)
     for i, module in enumerate(model.modules()):
         if i >= num_layers - 5:
+            print(f"{i}: {num_layers - i}")
             hook = module.register_forward_hook(hook_fn)
             hooks.append(hook)
 
 
-def write_ds(model, dataloader):
+def write_ds(model, dataloader, data_info_path):
     global tail_cache
     
+    criterion = torch.nn.CrossEntropyLoss(reduction='none') 
     data = [[] for _ in range(5)]
     outputs = {
         '1-to-last': [],
@@ -44,46 +48,100 @@ def write_ds(model, dataloader):
         '3-to-last': [],
         '4-to-last': [],
         '5-to-last': [],
+        '6-to-last': [],
+        '7-to-last': [],
         'protected-class': [],
         'loss': [],
         'actual_label': [],
         'predicted_label': [],
     }
 
+    data_info_df = pd.read_csv(data_info_path)
+
+    loc = 0
+    cols = list(data_info_df.columns)[0].split(' ')
+
+    blond_hair_ind = 0
+    male_ind = 0
+    i = 0
+    while blond_hair_ind * male_ind == 0:
+        if cols[i] == 'Blond_Hair':
+            blond_hair_ind = i
+        elif cols[i] == 'Male':
+            male_ind = i
+        i += 1
+
     for example in dataloader:
-        input = example[0] 
-        output = model(input)
+        inputs = example[0] 
+        batch_size = len(inputs)
+        y_true = list()
+        for i in range(batch_size):
+            col_list = list(data_info_df.iloc[loc + i])[0].split(' ')
+            while '' in col_list:
+                col_list.remove('')
+            y = int(col_list[blond_hair_ind])
+            y = max(0, y)
+            y_true.append(y)
+            male = int(col_list[male_ind])
+            if y == 1:
+                if male:
+                    # blond male
+                    outputs['protected-class'].append(0)
+                else:
+                    # blond female
+                    outputs['protected-class'].append(1)
+            else:
+                if male:
+                    # brunette male
+                    outputs['protected-class'].append(2)
+                else:
+                    # brunette female
+                    outputs['protected-class'].append(3)
+            outputs['actual_label'].append(y)
+
+
+        output = model(inputs)
         pred = torch.argmax(output, 1)
-        outputs['predicted_label'].append(pred)
-        outputs['loss'].append(output)
+        pred = pred.to(torch.float)
+        y_true_tensor = torch.tensor(y_true, dtype=torch.float)
+        loss = criterion(pred, y_true_tensor)
+        for i in range(batch_size):
+            outputs['predicted_label'].append(int(pred[i].item()))
+            outputs['loss'].append(loss.item())
+
 
         for idx, tensor in enumerate(tail_cache):
             batch = list(torch.split(tensor, 1, dim=0))
-            outputs[f'{idx}-to-last'].expend(batch)
+            outputs[f'{idx + 1}-to-last'].extend(batch)
             
-            # data[idx].extend(batch)
-        
+        loc += batch_size
+        # if loc > batch_size * 5:
+        #     break
         tail_cache = []
 
+    # # print(outputs)
+    # return
     torch.save(outputs, f'celeba_embeddings.pt')
-    # for i, layer in enumerate(data):
-    #     outputs = torch.stack(layer)
-    #     torch.save(outputs, f'{i}_layer_outputs.pt')
 
 
 def main():
     parser = argparse.ArgumentParser(description='Caches model run tensors.')
     parser.add_argument('--config_fp', type=str, help='relative file path to config json.')
     parser.add_argument('--pretrained_fp', type=str, help='relative file path to model checkpoint.')
+    parser.add_argument('--data_info', type=str, help='relative file path to the data info')
     args = parser.parse_args()
 
     harness, dataloaders, num_classes, model = setup(args.config_fp)
     
-    state_dict = torch.load(args.pretrained_fp)
-    model.load_state_dict(state_dict['state_dict'])
+    state_dict = torch.load(args.pretrained_fp, map_location=torch.device('cpu'))
+    # print(state_dict['state_dict'].keys())
+    # return
+    model.load_state_dict(state_dict['state_dict'], strict=False)
     model.eval()
     get_hooks(model)
-    write_ds(model, dataloaders['test'])
+    # print('before')
+    write_ds(model, dataloaders['train'], args.data_info)
+    # print('after')
 
 if __name__ == '__main__':
     main()
