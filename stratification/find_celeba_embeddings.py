@@ -20,10 +20,16 @@ def setup(config_fp):
     return harness, dataloaders, num_classes, model
 
 
-tail_cache = []
+tail_cache = dict()
 def hook_fn(module, input, output):
-    tail_cache.append(input[0].clone().detach())
-    # print(len(tail_cache))
+    # print(f"module type: {type(module)}\tinput type: {type(input)}\toutput type: {type(output)}")
+    # device = module.get_device()
+    device = output.get_device()
+    if device in tail_cache:
+        tail_cache[device].append(input[0].clone().detach())
+    else:
+        tail_cache[device] = [input[0].clone().detach()]
+    print(len(tail_cache[device]), module)
 
 
 def get_hooks(model):
@@ -33,8 +39,11 @@ def get_hooks(model):
     for i, module in enumerate(model.modules()):
         if i >= num_layers - 5:
             print(f"{i}: {num_layers - i}")
+            print(module)
             hook = module.register_forward_hook(hook_fn)
             hooks.append(hook)
+
+    print('hooks_length: ', len(hooks))
 
 
 def write_ds(model, dataloader, data_info_path):
@@ -100,7 +109,9 @@ def write_ds(model, dataloader, data_info_path):
             outputs['actual_label'].append(y)
 
 
+        print('before through model', len(tail_cache))
         output = model(inputs)
+        print('after through model', len(tail_cache))
         pred = torch.argmax(output, 1)
         pred = pred.to(torch.float)
         y_true_tensor = torch.tensor(y_true, dtype=torch.float)
@@ -109,19 +120,21 @@ def write_ds(model, dataloader, data_info_path):
             outputs['predicted_label'].append(int(pred[i].item()))
             outputs['loss'].append(loss.item())
 
-
-        for idx, tensor in enumerate(tail_cache):
-            batch = list(torch.split(tensor, 1, dim=0))
-            outputs[f'{idx + 1}-to-last'].extend(batch)
+        tail_cache_keys = list(tail_cache.keys())
+        for key in tail_cache_keys:
+            for idx, tensor in enumerate(tail_cache[key]):
+                batch = list(torch.split(tensor, 1, dim=0))
+                outputs[f'{idx + 1}-to-last'].extend(batch)
             
         loc += batch_size
+        break
         # if loc > batch_size * 5:
         #     break
-        tail_cache = []
+        tail_cache = dict()
 
-    # # print(outputs)
-    # return
-    torch.save(outputs, f'celeba_embeddings.pt')
+    # print(outputs)
+    return
+    # torch.save(outputs, f'celeba_embeddings.pt')
 
 
 def main():
@@ -134,11 +147,13 @@ def main():
     harness, dataloaders, num_classes, model = setup(args.config_fp)
     
     state_dict = torch.load(args.pretrained_fp, map_location=torch.device('cpu'))
-    # print(state_dict['state_dict'].keys())
+    # print(sate_dict['state_dict'].keys())
     # return
     model.load_state_dict(state_dict['state_dict'], strict=False)
     model.eval()
+    print('before get_hooks', len(tail_cache))
     get_hooks(model)
+    print('after get_hooks', len(tail_cache))
     # print('before')
     write_ds(model, dataloaders['train'], args.data_info)
     # print('after')
