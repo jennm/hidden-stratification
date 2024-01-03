@@ -62,8 +62,8 @@ def main():
 
     harness, dataloaders, num_classes, model = setup(args.config_fp)
     
-    state_dict = torch.load(args.pretrained_fp)
-    model.load_state_dict(state_dict['state_dict'])
+    state_dict = torch.load(args.pretrained_fp)#, map_location=torch.device('cpu'))
+    model.load_state_dict(state_dict['state_dict'], strict=False)
     model.eval()
     get_hooks(model)
     write_ds(model, dataloaders['test'])

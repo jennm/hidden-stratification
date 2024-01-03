@@ -1,4 +1,5 @@
 import argparse
+import gc
 import json
 import torch
 import pandas as pd
@@ -15,21 +16,21 @@ def setup(config_fp):
     harness = GEORGEHarness(config, use_cuda=torch.cuda.is_available(), log_format='simple')
     dataloaders = harness.get_dataloaders(config, mode='erm')
     num_classes = dataloaders['train'].dataset.get_num_classes('superclass')
-    model = harness.get_nn_model(config, num_classes=num_classes, mode='erm')
+    print('num classes:', num_classes)
+    with torch.no_grad(): 
+        model = harness.get_nn_model(config, num_classes=num_classes, mode='erm')
 
     return harness, dataloaders, num_classes, model
 
 
 tail_cache = dict()
 def hook_fn(module, input, output):
-    # print(f"module type: {type(module)}\tinput type: {type(input)}\toutput type: {type(output)}")
-    # device = module.get_device()
     device = output.get_device()
     if device in tail_cache:
         tail_cache[device].append(input[0].clone().detach())
     else:
         tail_cache[device] = [input[0].clone().detach()]
-    print(len(tail_cache[device]), module)
+    # print(len(tail_cache[device]), module)
 
 
 def get_hooks(model):
@@ -43,22 +44,19 @@ def get_hooks(model):
             hook = module.register_forward_hook(hook_fn)
             hooks.append(hook)
 
-    print('hooks_length: ', len(hooks))
-
 
 def write_ds(model, dataloader, data_info_path):
     global tail_cache
     
     criterion = torch.nn.CrossEntropyLoss(reduction='none') 
     data = [[] for _ in range(5)]
+    iteration_to_save = 700
     outputs = {
         '1-to-last': [],
         '2-to-last': [],
         '3-to-last': [],
         '4-to-last': [],
         '5-to-last': [],
-        '6-to-last': [],
-        '7-to-last': [],
         'protected-class': [],
         'loss': [],
         'actual_label': [],
@@ -80,8 +78,12 @@ def write_ds(model, dataloader, data_info_path):
             male_ind = i
         i += 1
 
+    iteration = 0
+    num = 1
+
     for example in dataloader:
         inputs = example[0] 
+        
         batch_size = len(inputs)
         y_true = list()
         for i in range(batch_size):
@@ -109,32 +111,56 @@ def write_ds(model, dataloader, data_info_path):
             outputs['actual_label'].append(y)
 
 
-        print('before through model', len(tail_cache))
-        output = model(inputs)
-        print('after through model', len(tail_cache))
+        with torch.no_grad():
+            output = model(inputs)
         pred = torch.argmax(output, 1)
         pred = pred.to(torch.float)
-        y_true_tensor = torch.tensor(y_true, dtype=torch.float)
+        y_true_tensor = torch.tensor(y_true, dtype=torch.float, device='cuda')
         loss = criterion(pred, y_true_tensor)
         for i in range(batch_size):
             outputs['predicted_label'].append(int(pred[i].item()))
             outputs['loss'].append(loss.item())
-
+        
         tail_cache_keys = list(tail_cache.keys())
         for key in tail_cache_keys:
             for idx, tensor in enumerate(tail_cache[key]):
+                if idx < 2 :
+                    continue
                 batch = list(torch.split(tensor, 1, dim=0))
-                outputs[f'{idx + 1}-to-last'].extend(batch)
+                outputs[f'{idx - 1}-to-last'].extend(batch)
             
         loc += batch_size
-        break
+        iteration += 1
+        print('iteration:', loc / batch_size)
         # if loc > batch_size * 5:
         #     break
         tail_cache = dict()
+        gc.collect()
+        torch.cuda.empty_cache()
 
-    # print(outputs)
-    return
-    # torch.save(outputs, f'celeba_embeddings.pt')
+        # print('batch_size', batch_size)
+        # for i in range(1,8):
+        #     print(len(outputs[f'{idx}-to-last']))
+        # print(outputs)
+        # return
+        if iteration_to_save == iteration:
+            torch.save(outputs, f'celeba_embeddings_{num}.pt')
+            num += 1
+            del outputs
+            outputs = {
+                '1-to-last': [],
+                '2-to-last': [],
+                '3-to-last': [],
+                '4-to-last': [],
+                '5-to-last': [],
+                'protected-class': [],
+                'loss': [],
+                'actual_label': [],
+                'predicted_label': [],
+            }
+            iteration = 0
+    if iteration > 0:
+        torch.save(outputs, f'celeba_embeddings_{num}.pt')
 
 
 def main():
@@ -146,17 +172,11 @@ def main():
 
     harness, dataloaders, num_classes, model = setup(args.config_fp)
     
-    state_dict = torch.load(args.pretrained_fp, map_location=torch.device('cpu'))
-    # print(sate_dict['state_dict'].keys())
-    # return
+    state_dict = torch.load(args.pretrained_fp, map_location=torch.device('cuda'))
     model.load_state_dict(state_dict['state_dict'], strict=False)
     model.eval()
-    print('before get_hooks', len(tail_cache))
     get_hooks(model)
-    print('after get_hooks', len(tail_cache))
-    # print('before')
     write_ds(model, dataloaders['train'], args.data_info)
-    # print('after')
 
 if __name__ == '__main__':
     main()
