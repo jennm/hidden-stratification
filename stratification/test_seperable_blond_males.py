@@ -5,6 +5,7 @@ import logging
 import numpy as np
 import os
 import pandas as pd
+import sklearn.metrics
 import torch
 import torchvision.transforms as transforms
 import torch.multiprocessing as mp
@@ -16,6 +17,7 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 
 from stratification.harness import GEORGEHarness
+from stratification.intersectional_algorithm import ALGOClassification
 from stratification.utils.parse_args import get_config
 
 
@@ -168,11 +170,10 @@ def load_pretrained_model(model_path, model):
     get_hooks(model)
     return model
 
-def collate_func(batch, pretrained_model, criterion, layer_num):
+def collate_func(batch, pretrained_model, criterion, layer_num, class_label=False):
     global tail_cache
     inputs = torch.stack([item['image'] for item in batch])
     labels = torch.stack([item['label'] for item in batch])
-    class_labels = torch.stack([item['class_labels'] for item in batch])
 
     with torch.no_grad():
         # Forward pass through the 5th to last layer
@@ -184,9 +185,13 @@ def collate_func(batch, pretrained_model, criterion, layer_num):
         labels = labels.to(device)
         loss = criterion(pred, labels)
 
-
     embeddings = torch.cat(tuple([tail_cache[i][layer_num + 1].to(device) for i in list(tail_cache.keys())]), dim=0)
-    data = {'embeddings': embeddings, 'loss': loss, 'predicted_label': labels, 'class_label': class_labels}
+
+    if class_label:
+        class_labels = torch.stack([item['class_labels'] for item in batch])
+        data = {'embeddings': embeddings, 'loss': loss, 'predicted_label': pred, 'actual_label': labels, 'class_label': class_labels}
+    else:
+        data = {'embeddings': embeddings, 'loss': loss, 'predicted_label': pred, 'actual_label': labels}
     tail_cache = dict()
     gc.collect()
     torch.cuda.empty_cache()
@@ -217,7 +222,96 @@ class LogisticRegressionModel(nn.Module):
         return nn.functional.softmax(self.linear(x), dim=1)
 
 
-def train_test_classifier(config_fp, pretrained_fp):
+def find_group(dataloaders, num_classes=2, loss_threshold=.5, acc_threshold=.9, actual_label=1):
+    input_size = 25088  # MNIST images are 28x28 pixels
+    num_classes = num_classes
+    log_model = LogisticRegressionModel(input_size, num_classes)
+    criterion = nn.CrossEntropyLoss(reduction='none')
+    optimizer = optim.SGD(log_model.parameters(), lr=0.01)
+    all_class_labels = list()
+
+    for batch in dataloaders['train']:
+        device = torch.cuda.current_device()
+        embeddings = batch['embeddings']
+        losses = batch['loss']
+        predicted_labels = batch['predicted_label']
+        actual_labels = batch['actual_label']
+
+        class_labels = list()
+        if losses.item() >= loss_threshold:
+            for i in range(embeddings.shape[0]):
+                if predicted_labels[i] != actual_labels[i] and actual_labels[i] == actual_label:
+                    class_labels.append(1)
+                else:
+                    class_labels.append(0)
+            class_label = 1
+        else:
+            class_labels = [0 for i in range(embeddings.shape[0])]
+                
+        # for i in range(len(losses)):
+        #     if losses[i] >= loss_threshold and predicted_labels[i] != actual_label[i] and actual_labels[i] == actual_label:
+        #         class_labels.append(1)
+        #     else:
+        #         class_labels.append(0)
+
+    # for batch in dataloaders['train']:
+        # device = torch.cuda.current_device()
+        log_model.to(device)
+        embeddings = batch['embeddings']
+        # loss = batch['loss']
+        # class_labels = batch['class_label']
+
+        # Flatten the images
+        embeddings = embeddings.view(embeddings.size(0), -1)
+        class_labels = torch.tensor(class_labels)
+        class_labels = class_labels.to(device)
+        # all_class_labels.extend(class_labels)
+
+        # Forward pass
+        outputs = log_model(embeddings)
+
+        # Changing torch type
+        class_labels = class_labels.to(torch.long)#float)
+
+        # Calculate loss
+        loss = criterion(outputs, class_labels)
+        loss_mean = torch.mean(loss)
+
+        # Backward pass and optimization
+        optimizer.zero_grad()
+        loss_mean.backward()
+        optimizer.step()
+
+    log_model.eval()
+    with torch.no_grad():
+        correct = 0
+        total = 0
+        for batch in dataloaders['val']:
+            embeddings = batch['embeddings']
+            loss = batch['loss']
+            predicted_labels = batch['predicted_label']
+            actual_labels = batch['actual_label']
+
+            class_labels = list()
+            for i in range(len(losses)):
+                if losses[i] >= loss_threshold and predicted_labels[i] != actual_label[i] and actual_labels[i] == actual_label:
+                    class_labels.append(1)
+                else:
+                    class_labels.append(0)
+
+            embeddings = embeddings.view(embeddings.size(0), -1)
+            outputs = log_model(embeddings)
+
+            _, predicted = torch.max(outputs, 1)
+            total += class_labels.size(0)
+            correct += (predicted == class_labels).sum().item()
+
+        accuracy = correct / total
+        print(f'Test Accuracy: {accuracy:.4f}')
+    return log_model, accuracy
+
+
+def train_test_classifier(config_fp, pretrained_fp, robust=True):
     _model, dataset, shared_dl_args, num_classes = setup(config_fp)
     
 
@@ -236,6 +330,22 @@ def train_test_classifier(config_fp, pretrained_fp):
     val_dataset = CelebADataset(root='data', split='val', test_celeba=True)
     test_dataset = CelebADataset(root='data', split='test', test_celeba=True)
     datasets = {'train': train_dataset, 'val': val_dataset, 'test': test_dataset}
+    layer_num = 3
+
+    # find_group=True
+    classify = ALGOClassification(config_fp)
+
+    while True:
+        groups = find_group(train_dataset)
+        classify.train(model, train_dataloader, val_dataloader, groups, robust)
+
+    # Initialize the model, loss function, and optimizer
+    dataloaders, old_model = create_dataloader(pretrained_fp, _model, datasets, shared_dl_args, layer_num)
+    log_models, acc = find_group(dataloaders, 2)
+        
+        #retrain
+    return log_models, acc
+    # return new_model
 
     for i in range(5):
         print(f'Layer {i}')
