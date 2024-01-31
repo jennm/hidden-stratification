@@ -155,7 +155,7 @@ class MNISTDataset(GEORGEDataset):
         original_label_counts = np.bincount(original_labels)
         assert all(i > 0 for i in original_label_counts), \
             'set(labels) must consist of consecutive numbers in [0, S]'
-        val_quota = np.round(original_label_counts * val_proportion).astype(np.int)
+        val_quota = np.round(original_label_counts * val_proportion).astype(np.int32)
 
         # reset seed here in case random fns called again (i.e. if get_loaders called twice)
         prev_state = random.getstate()
@@ -249,7 +249,7 @@ def open_maybe_compressed_file(path):
     """Return a file object that possibly decompresses 'path' on the fly.
        Decompression occurs when argument `path` is a string and ends with '.gz' or '.xz'.
     """
-    if not isinstance(path, torch._six.string_classes):
+    if not isinstance(path, str):
         return path
     if path.endswith('.gz'):
         import gzip
