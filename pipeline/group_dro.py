@@ -13,6 +13,8 @@ class GroupDRO:
         with torch.set_grad_enabled(train):
             for batch_idx, (inputs, targets) in enumerate(dataloader):
                 N = len(inputs)
+                superclass_targets = None  # idk how we will get these
+                
                 for classifier in classifiers:
                     predicted_groups = torch.argmax(classifier(inputs), 1)
 
